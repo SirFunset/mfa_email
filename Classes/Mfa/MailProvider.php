@@ -126,7 +126,9 @@ class MailProvider implements MfaProviderInterface
             return false;
         }
 
-        $authCodeInput = trim((string)($request->getQueryParams()['authCode'] ?? $request->getParsedBody()['authCode'] ?? ''));
+        $parsedBody = $request->getParsedBody();
+        $authCode = $request->getQueryParams()['authCode'] ?? (is_array($parsedBody) ? ($parsedBody['authCode'] ?? null) : null);
+        $authCodeInput = is_string($authCode) ? trim($authCode) : '';
         $properties = $propertyManager->getProperties();
         $storedAuthCode = (string)($properties['authCode'] ?? '');
 
@@ -210,7 +212,8 @@ class MailProvider implements MfaProviderInterface
         }
 
         $parsedBody = $request->getParsedBody();
-        $email = trim((string)(is_array($parsedBody) ? ($parsedBody['email'] ?? '') : ''));
+        $email = is_array($parsedBody) ? ($parsedBody['email'] ?? null) : null;
+        $email = is_string($email) ? trim($email) : '';
         if (!$this->checkValidEmail($email)) {
             return false;
         }
@@ -233,14 +236,20 @@ class MailProvider implements MfaProviderInterface
      */
     protected function sendAuthCodeEmail(MfaProviderPropertyManager $propertyManager): void
     {
+        if (!$this->isActive($propertyManager) || $this->isLocked($propertyManager)) {
+            return;
+        }
+
         $authCode = (string)$propertyManager->getProperty('authCode', '');
 
         if ($authCode === '' || $this->isAuthCodeExpired($propertyManager->getProperties())) {
             $authCode = $this->generateAuthCode();
-            $propertyManager->updateProperties([
+            if (!$propertyManager->updateProperties([
                 'authCode' => $authCode,
                 'authCodeCreated' => $this->getTimestamp(),
-            ]);
+            ])) {
+                return;
+            }
         }
 
         $recipient = (string)$propertyManager->getProperty('email', '');

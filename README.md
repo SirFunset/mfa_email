@@ -2,21 +2,44 @@
 
 This extension adds the E-Mail MFA provider to TYPO3.
 
+Maintained fork: [SirFunset/mfa_email](https://github.com/SirFunset/mfa_email),
+published as `funset/mfa-email`. Originally developed by Ralf Freit in
+[MrSilaz/mfa_email](https://github.com/MrSilaz/mfa_email).
+
 ## Compatibility
 
-| Extension version | TYPO3               | PHP         |
-|-------------------|---------------------|-------------|
-| 3.x               | 14.3 LTS            | 8.2 - 8.5   |
-| 2.x               | 13.4 LTS            | 8.2+        |
-| 1.x               | 11.5 LTS & 12.4 LTS | 7.4+ & 8.1+ |
+| Extension version | Branch     | TYPO3    | PHP  |
+|-------------------|------------|----------|------|
+| 14.x              | main       | 14.3 LTS | 8.2+ |
+| 13.x              | main-v13   | 13.4 LTS | 8.2+ |
+| 12.x              | main-v12   | 12.4 LTS | 8.1+ |
+
+Major versions follow TYPO3's major version. TYPO3 11 is not supported by this fork.
 
 ## Installation
 
 You can install the extension via composer
 
-```composer require ralffreit/mfa-email```
+`composer require funset/mfa-email:^14.0`
 
-or via [TYPO3 extension repository](https://extensions.typo3.org/extension/mfa_email/)
+Use `^12.0` or `^13.0` for the corresponding TYPO3 version. This fork must first
+be registered and released on Packagist; installation is available after that.
+The upstream TER listing does not distribute this fork.
+
+When migrating from upstream, remove the old requirement without updating first:
+
+```sh
+composer remove ralffreit/mfa-email --no-update
+composer require funset/mfa-email:^14.0 --with-all-dependencies
+```
+
+The extension key (`mfa_email`), provider identifier (`email`), PHP namespace,
+templates, and existing MFA settings remain unchanged. Both packages must not be
+installed together; Composer explicitly prevents this. Existing codes without a
+creation timestamp expire on upgrade and are regenerated on the next login.
+
+See [release setup and maintenance](Documentation/Releasing.md) for publishing,
+automatic patch releases, minor releases, and backporting.
 
 ## About Mail MFA
 

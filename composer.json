@@ -1,5 +1,5 @@
 {
-    "name": "ralffreit/mfa-email",
+    "name": "funset/mfa-email",
     "type": "typo3-cms-extension",
     "description": "E-Mail MFA Provider: provides multi-factor authentication via e-mail for the TYPO3 backend.",
     "license": "GPL-3.0-or-later",
@@ -11,18 +11,38 @@
             "name": "Ralf Freit",
             "email": "ralf@freit.de",
             "role": "Developer"
+        },
+        {
+            "name": "Benno Nijholt",
+            "email": "ik@bennonijholt.nl",
+            "role": "Developer"
         }
     ],
     "support": {
-        "issues": "https://github.com/MrSilaz/mfa_email/issues",
-        "source": "https://github.com/MrSilaz/mfa_email/"
+        "issues": "https://github.com/SirFunset/mfa_email/issues",
+        "source": "https://github.com/SirFunset/mfa_email"
     },
-    "version": "3.0.0",
     "minimum-stability": "stable",
     "prefer-stable": true,
     "require": {
         "php": "^8.2",
-        "typo3/cms-core": "^14.3"
+        "typo3/cms-core": "^14.3",
+        "typo3/cms-fluid": "^14.3"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5"
+    },
+    "scripts": {
+        "test": "phpunit -c phpunit.xml.dist"
+    },
+    "config": {
+        "allow-plugins": {
+            "typo3/class-alias-loader": true,
+            "typo3/cms-composer-installers": true
+        }
+    },
+    "conflict": {
+        "ralffreit/mfa-email": "*"
     },
     "autoload": {
         "psr-4": {
@@ -35,12 +55,15 @@
     "extra": {
         "typo3/cms": {
             "extension-key": "mfa_email",
-            "version": "3.0.0",
+            "version": "14.0.0",
             "cms-package-dir": "{$vendor-dir}/typo3/cms",
             "web-dir": ".Build/public",
             "Package": {
                 "providesPackages": {}
             }
+        },
+        "branch-alias": {
+            "dev-main": "14.0.x-dev"
         }
     }
 }
