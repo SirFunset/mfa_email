@@ -4,29 +4,33 @@ declare(strict_types=1);
 
 namespace Ralffreit\MfaEmail\Mfa;
 
-use Exception;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Symfony\Component\Mime\Address;
 use TYPO3\CMS\Core\Authentication\Mfa\MfaProviderInterface;
 use TYPO3\CMS\Core\Authentication\Mfa\MfaProviderPropertyManager;
 use TYPO3\CMS\Core\Authentication\Mfa\MfaViewType;
+use TYPO3\CMS\Core\Configuration\Exception\ExtensionConfigurationExtensionNotConfiguredException;
+use TYPO3\CMS\Core\Configuration\Exception\ExtensionConfigurationPathDoesNotExistException;
 use TYPO3\CMS\Core\Configuration\ExtensionConfiguration;
 use TYPO3\CMS\Core\Context\Context;
 use TYPO3\CMS\Core\Context\Exception\AspectNotFoundException;
 use TYPO3\CMS\Core\Http\ResponseFactory;
-use TYPO3\CMS\Core\Localization\LanguageService;
+use TYPO3\CMS\Core\Localization\LanguageServiceFactory;
 use TYPO3\CMS\Core\Mail\FluidEmail;
 use TYPO3\CMS\Core\Mail\Mailer;
 use TYPO3\CMS\Core\Messaging\FlashMessage;
 use TYPO3\CMS\Core\Messaging\FlashMessageService;
+use TYPO3\CMS\Core\Type\ContextualFeedbackSeverity;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
-use TYPO3\CMS\Fluid\View\StandaloneView;
-use TYPO3Fluid\Fluid\View\ViewInterface;
 use TYPO3\CMS\Core\Utility\MathUtility;
+use TYPO3\CMS\Fluid\View\StandaloneView;
 
 class MailProvider implements MfaProviderInterface
 {
+    protected const DEFAULT_MAX_ATTEMPTS = 6;
+    protected const DEFAULT_CODE_VALIDITY_PERIOD = 900;
+
     protected Context $context;
     protected ResponseFactory $responseFactory;
     protected array $extensionConfiguration;
@@ -37,13 +41,16 @@ class MailProvider implements MfaProviderInterface
      * @param Context $context
      * @param ResponseFactory $responseFactory
      * @param ExtensionConfiguration $extensionConfiguration
-     * @throws Exception
      */
     public function __construct(Context $context, ResponseFactory $responseFactory, ExtensionConfiguration $extensionConfiguration)
     {
         $this->context = $context;
         $this->responseFactory = $responseFactory;
-        $this->extensionConfiguration = $extensionConfiguration->get('mfa_email');
+        try {
+            $this->extensionConfiguration = $extensionConfiguration->get('mfa_email');
+        } catch (ExtensionConfigurationExtensionNotConfiguredException|ExtensionConfigurationPathDoesNotExistException) {
+            $this->extensionConfiguration = [];
+        }
     }
 
     /**
@@ -52,7 +59,7 @@ class MailProvider implements MfaProviderInterface
      */
     public function canProcess(ServerRequestInterface $request): bool
     {
-        // @Todo: Check why not?
+        // Sending a code by e-mail has no further technical requirements.
         return true;
     }
 
@@ -97,6 +104,7 @@ class MailProvider implements MfaProviderInterface
     ): ResponseInterface {
         $this->request = $request;
         $view = GeneralUtility::makeInstance(StandaloneView::class);
+        $view->setRequest($request);
         $view->setTemplateRootPaths(['EXT:mfa_email/Resources/Private/Templates/Mfa']);
         switch ($type) {
             case MfaViewType::SETUP:
@@ -127,15 +135,24 @@ class MailProvider implements MfaProviderInterface
             return false;
         }
 
-        $authCodeInput = trim((string)($request->getQueryParams()['authCode'] ?? $request->getParsedBody()['authCode'] ?? ''));
+        $parsedBody = $request->getParsedBody();
+        $authCodeInput = $request->getQueryParams()['authCode']
+            ?? (is_array($parsedBody) ? ($parsedBody['authCode'] ?? '') : '');
+        $authCodeInput = is_string($authCodeInput) ? trim($authCodeInput) : '';
         $properties = $propertyManager->getProperties();
+        $storedAuthCode = (string)($properties['authCode'] ?? '');
 
-        if ($authCodeInput === '' || ($properties['authCode'] ?? '') === '') {
+        if ($authCodeInput === '' || $storedAuthCode === '') {
             // Cannot verify when authCode was not saved or passed empty
             return false;
         }
 
-        if ($authCodeInput !== $properties['authCode']) {
+        if ($this->isAuthCodeExpired($properties)) {
+            $propertyManager->updateProperties(['authCode' => '', 'authCodeCreated' => 0]);
+            return false;
+        }
+
+        if (!hash_equals($storedAuthCode, $authCodeInput)) {
 
             if (!isset($properties['attempts']) || !MathUtility::canBeInterpretedAsInteger($properties['attempts'])) {
                 $properties['attempts'] = 0;
@@ -146,6 +163,7 @@ class MailProvider implements MfaProviderInterface
             if ($properties['attempts'] >= $this->getMaxAttempts()) {
                 // Reset the code
                 $properties['authCode'] = '';
+                $properties['authCodeCreated'] = 0;
             }
 
             $propertyManager->updateProperties($properties);
@@ -154,8 +172,9 @@ class MailProvider implements MfaProviderInterface
         }
 
         $properties['authCode'] = '';
+        $properties['authCodeCreated'] = 0;
         $properties['attempts'] = 0;
-        $properties['lastUsed'] = $this->context->getPropertyFromAspect('date', 'timestamp');
+        $properties['lastUsed'] = $this->getTimestamp();
 
         return $propertyManager->updateProperties($properties);
     }
@@ -215,12 +234,17 @@ class MailProvider implements MfaProviderInterface
             return false;
         }
 
-        $email = trim($request->getParsedBody()['email']);
+        $parsedBody = $request->getParsedBody();
+        $email = is_array($parsedBody) ? ($parsedBody['email'] ?? '') : '';
+        $email = is_string($email) ? trim($email) : '';
         if (!$this->checkValidEmail($email)) {
             return false;
         }
 
         $properties = [
+            'attempts' => 0,
+            'authCode' => '',
+            'authCodeCreated' => 0,
             'email' => $email,
             'active' => true
         ];
@@ -237,34 +261,48 @@ class MailProvider implements MfaProviderInterface
     protected function sendAuthCodeEmail(MfaProviderPropertyManager $propertyManager, bool $resend = false): void
     {
         $newAuthCode = false;
-        $authCode = $propertyManager->getProperty('authCode');
+        if (!$this->isActive($propertyManager) || $this->isLocked($propertyManager)) {
+            return;
+        }
+        $authCode = (string)$propertyManager->getProperty('authCode', '');
 
-        if (empty($authCode)) {
+        if ($authCode === '' || $this->isAuthCodeExpired($propertyManager->getProperties())) {
             $authCode = $this->generateAuthCode();
-            $propertyManager->updateProperties(['authCode' => $authCode]);
+            if (!$propertyManager->updateProperties([
+                'authCode' => $authCode,
+                'authCodeCreated' => $this->getTimestamp(),
+            ])) {
+                return;
+            }
             $newAuthCode = true;
         }
 
         if ($newAuthCode || $resend) {
-            $mailLayoutName = (isset($this->extensionConfiguration['mailLayoutName']) && trim($this->extensionConfiguration['mailLayoutName']) !== '') ? $this->extensionConfiguration['mailLayoutName'] : 'MfaEmail';
-            $mailTemplateName = (isset($this->extensionConfiguration['mailTemplateName']) && trim($this->extensionConfiguration['mailTemplateName']) !== '') ? $this->extensionConfiguration['mailTemplateName'] : 'MfaEmail';
+            $mailLayoutName = $this->getTemplateName('mailLayoutName');
+            $mailTemplateName = $this->getTemplateName('mailTemplateName');
+            $recipient = (string)$propertyManager->getProperty('email', '');
+            if ($recipient === '') {
+                return;
+            }
 
             $email = GeneralUtility::makeInstance(FluidEmail::class);
             $email->setRequest($this->request);
             $email
-                ->to($propertyManager->getProperty('email'))
+                ->to($recipient)
                 ->setTemplate($mailTemplateName)
                 ->assignMultiple([
                     'authCode' => $authCode,
-                    'email' => $propertyManager->getProperty('email'),
+                    'email' => $recipient,
                     'layoutName' => $mailLayoutName
                 ]);
 
             $email->getHtmlBody(true); // Generate Subject
             $email->subject($email->getSubject());
 
-            if (!empty($this->extensionConfiguration['mailSenderEmail'])) {
-                $email->from(new Address($this->extensionConfiguration['mailSenderEmail'], $this->extensionConfiguration['mailSenderName']));
+            $senderEmail = trim((string)($this->extensionConfiguration['mailSenderEmail'] ?? ''));
+            if ($senderEmail !== '') {
+                $senderName = trim((string)($this->extensionConfiguration['mailSenderName'] ?? ''));
+                $email->from(new Address($senderEmail, $senderName));
             }
 
             GeneralUtility::makeInstance(Mailer::class)->send($email);
@@ -274,16 +312,16 @@ class MailProvider implements MfaProviderInterface
     /**
      * Set the template and assign necessary variables for the edit view
      *
-     * @param ViewInterface $view
+     * @param StandaloneView $view
      * @param MfaProviderPropertyManager $propertyManager
      */
-    protected function prepareEditView(ViewInterface $view, MfaProviderPropertyManager $propertyManager): void
+    protected function prepareEditView(StandaloneView $view, MfaProviderPropertyManager $propertyManager): void
     {
         $view->setTemplate('Edit');
         $view->assignMultiple([
-            'email' => (empty($propertyManager->getProperty('email')) ? $GLOBALS['BE_USER']->user['email'] : $propertyManager->getProperty('email')),
-            'lastUsed' => $this->getDateTime($propertyManager->getProperty('lastUsed', 0)),
-            'updated' => $this->getDateTime($propertyManager->getProperty('updated', 0)),
+            'email' => (string)($propertyManager->getProperty('email') ?: ($GLOBALS['BE_USER']->user['email'] ?? '')),
+            'lastUsed' => $this->getDateTime((int)$propertyManager->getProperty('lastUsed', 0)),
+            'updated' => $this->getDateTime((int)$propertyManager->getProperty('updated', 0)),
         ]);
     }
 
@@ -291,10 +329,10 @@ class MailProvider implements MfaProviderInterface
      * Set the template and assign necessary variables for the auth view
      *
      * @param ServerRequestInterface $request
-     * @param ViewInterface $view
+     * @param StandaloneView $view
      * @param MfaProviderPropertyManager $propertyManager
      */
-    protected function prepareAuthView(ServerRequestInterface $request, ViewInterface $view, MfaProviderPropertyManager $propertyManager): void
+    protected function prepareAuthView(ServerRequestInterface $request, StandaloneView $view, MfaProviderPropertyManager $propertyManager): void
     {
         $queryParams = $request->getQueryParams();
         $resend = !empty($queryParams['resend']) && $queryParams['resend'] === '1';
@@ -314,15 +352,22 @@ class MailProvider implements MfaProviderInterface
      */
     protected function generateAuthCode(): string
     {
-        $code = [];
-        $charSet = '0123456789';
-        $charSetLength = strlen($charSet) - 1;
-        for ($i = 0; $i < 6; $i++) {
-            $n = rand(0, $charSetLength);
-            $code[] = $charSet[$n];
+        return str_pad((string)random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+    }
+
+    protected function isAuthCodeExpired(array $properties): bool
+    {
+        $validityPeriod = $this->getCodeValidityPeriod();
+        if ($validityPeriod <= 0) {
+            return false;
         }
-        shuffle($code);
-        return implode($code);
+        $created = (int)($properties['authCodeCreated'] ?? 0);
+        return $created <= 0 || ($this->getTimestamp() - $created) > $validityPeriod;
+    }
+
+    protected function getTimestamp(): int
+    {
+        return (int)$this->context->getPropertyFromAspect('date', 'timestamp');
     }
 
     /**
@@ -361,9 +406,15 @@ class MailProvider implements MfaProviderInterface
         return true;
     }
 
-    public function isEmailValid($email)
+    public function isEmailValid(string $email): bool
     {
-        return filter_var($email, FILTER_VALIDATE_EMAIL);
+        return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+    }
+
+    protected function getTemplateName(string $key, string $default = 'MfaEmail'): string
+    {
+        $name = trim((string)($this->extensionConfiguration[$key] ?? ''));
+        return $name !== '' ? $name : $default;
     }
 
 
@@ -377,7 +428,7 @@ class MailProvider implements MfaProviderInterface
             FlashMessage::class,
             $this->showLocalizedMessage($messageKey . '.message'),
             $this->showLocalizedMessage($messageKey . '.title'),
-            FlashMessage::ERROR,
+            ContextualFeedbackSeverity::ERROR,
             true
         );
         $flashMessageService = GeneralUtility::makeInstance(FlashMessageService::class);
@@ -391,7 +442,9 @@ class MailProvider implements MfaProviderInterface
      */
     protected function showLocalizedMessage(string $messageKey, array $params = []): string
     {
-        return  \TYPO3\CMS\Extbase\Utility\LocalizationUtility::translate($messageKey, 'mfa_email', $params); // $this->getLanguageService()->sL($languageFilePrefix . $messageKey);
+        return GeneralUtility::makeInstance(LanguageServiceFactory::class)
+            ->createFromUserPreferences($GLOBALS['BE_USER'] ?? null)
+            ->sL('LLL:EXT:mfa_email/Resources/Private/Language/locallang.xlf:' . $messageKey);
     }
 
     /**
@@ -401,17 +454,29 @@ class MailProvider implements MfaProviderInterface
      */
     protected function getMaxAttempts(): int
     {
-        $maxAttempts = (isset($this->extensionConfiguration['maxAttempts']) ? (int)$this->extensionConfiguration['maxAttempts'] :  9999999);
-        $maxAttempts = ($maxAttempts !== -1 ? $maxAttempts : 9999999);
-
-        return $maxAttempts;
+        if (!isset($this->extensionConfiguration['maxAttempts'])
+            || !MathUtility::canBeInterpretedAsInteger($this->extensionConfiguration['maxAttempts'])
+        ) {
+            return self::DEFAULT_MAX_ATTEMPTS;
+        }
+        $maxAttempts = (int)$this->extensionConfiguration['maxAttempts'];
+        if ($maxAttempts === -1) {
+            return PHP_INT_MAX;
+        }
+        return $maxAttempts > 0 ? $maxAttempts : self::DEFAULT_MAX_ATTEMPTS;
     }
 
     /**
-     * @return LanguageService
+     * A non-positive configured value explicitly disables expiry, as on the main line.
      */
-    private function getLanguageService(): LanguageService
+    protected function getCodeValidityPeriod(): int
     {
-        return $GLOBALS['LANG'];
+        if (!isset($this->extensionConfiguration['codeValidityPeriod'])
+            || !MathUtility::canBeInterpretedAsInteger($this->extensionConfiguration['codeValidityPeriod'])
+        ) {
+            return self::DEFAULT_CODE_VALIDITY_PERIOD;
+        }
+        $validityPeriod = (int)$this->extensionConfiguration['codeValidityPeriod'];
+        return $validityPeriod > 0 ? $validityPeriod : 0;
     }
 }

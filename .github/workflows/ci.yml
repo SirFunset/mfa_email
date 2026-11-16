@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, main-v12, main-v13]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  php:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ${{ fromJSON((github.base_ref || github.ref_name) == 'main-v12' && '["8.1","8.2","8.3","8.4","8.5"]' || '["8.2","8.3","8.4","8.5"]') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: intl, mbstring, dom, pdo, sodium, iconv
+          coverage: none
+          tools: composer:v2
+      - run: composer validate --strict
+      - run: composer update --prefer-dist --no-interaction --no-progress --no-scripts --no-plugins
+      - name: PHP syntax
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import subprocess
+          for path in [*pathlib.Path('Classes').rglob('*.php'), *pathlib.Path('Tests').rglob('*.php'), *pathlib.Path('.').glob('*.php')]:
+              subprocess.run(['php', '-l', str(path)], check=True)
+          PY
+      - run: composer test
+      - run: composer audit --locked
+
+  release-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Release script tests
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v

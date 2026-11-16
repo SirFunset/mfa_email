@@ -1,7 +1,7 @@
 {
-    "name": "ralffreit/mfa-email",
+    "name": "funset/mfa-email",
     "type": "typo3-cms-extension",
-    "description": "This extension adds the E-Mail MFA provider to TYPO3, available for TYPO3 v11 ans TYPO3 v12.",
+    "description": "E-Mail MFA Provider: provides multi-factor authentication via e-mail for the TYPO3 backend.",
     "license": "GPL-3.0-or-later",
     "keywords": [
         "typo3", "email", "mfa"
@@ -11,18 +11,38 @@
             "name": "Ralf Freit",
             "email": "ralf@freit.de",
             "role": "Developer"
+        },
+        {
+            "name": "Benno Nijholt",
+            "email": "ik@bennonijholt.nl",
+            "role": "Developer"
         }
     ],
     "support": {
-        "issues": "https://github.com/MrSilaz/mfa_email/issues",
-        "source": "https://github.com/MrSilaz/mfa_email/"
+        "issues": "https://github.com/SirFunset/mfa_email/issues",
+        "source": "https://github.com/SirFunset/mfa_email"
     },
-    "version": "1.0.7",
-    "minimum-stability": "dev",
+    "minimum-stability": "stable",
     "prefer-stable": true,
     "require": {
-        "php": ">=7.4",
-        "typo3/cms-core": "^11.5 || ^12.4"
+        "php": "^8.1",
+        "typo3/cms-core": "^12.4",
+        "typo3/cms-fluid": "^12.4"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5"
+    },
+    "scripts": {
+        "test": "phpunit -c phpunit.xml.dist"
+    },
+    "config": {
+        "allow-plugins": {
+            "typo3/class-alias-loader": true,
+            "typo3/cms-composer-installers": true
+        }
+    },
+    "conflict": {
+        "ralffreit/mfa-email": "*"
     },
 
     "autoload": {
@@ -37,7 +57,11 @@
         "typo3/cms": {
             "cms-package-dir": "{$vendor-dir}/typo3/cms",
             "web-dir": ".Build/public",
-            "extension-key": "mfa_email"
+            "extension-key": "mfa_email",
+            "version": "12.0.0"
+        },
+        "branch-alias": {
+            "dev-main-v12": "12.0.x-dev"
         }
     }
 }
