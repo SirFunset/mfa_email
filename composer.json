@@ -4,7 +4,9 @@
     "description": "This extension adds the E-Mail MFA provider to TYPO3.",
     "license": "GPL-3.0-or-later",
     "keywords": [
-        "typo3", "email", "mfa"
+        "typo3",
+        "email",
+        "mfa"
     ],
     "authors": [
         {
@@ -44,7 +46,6 @@
     "conflict": {
         "ralffreit/mfa-email": "*"
     },
-
     "autoload": {
         "psr-4": {
             "Ralffreit\\MfaEmail\\": "Classes"
@@ -58,11 +59,10 @@
             "cms-package-dir": "{$vendor-dir}/typo3/cms",
             "web-dir": ".Build/public",
             "extension-key": "mfa_email",
-            "version": "13.0.0"
+            "version": "13.0.1"
         },
         "branch-alias": {
             "dev-main-v13": "13.0.x-dev"
         }
     }
 }
-
