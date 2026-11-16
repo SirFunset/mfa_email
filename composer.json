@@ -4,7 +4,12 @@
     "description": "E-Mail MFA Provider: provides multi-factor authentication via e-mail for the TYPO3 backend.",
     "license": "GPL-3.0-or-later",
     "keywords": [
-        "typo3", "email", "mfa", "2fa", "authentication", "security"
+        "typo3",
+        "email",
+        "mfa",
+        "2fa",
+        "authentication",
+        "security"
     ],
     "authors": [
         {
@@ -55,7 +60,7 @@
     "extra": {
         "typo3/cms": {
             "extension-key": "mfa_email",
-            "version": "14.0.0",
+            "version": "14.0.1",
             "cms-package-dir": "{$vendor-dir}/typo3/cms",
             "web-dir": ".Build/public",
             "Package": {
