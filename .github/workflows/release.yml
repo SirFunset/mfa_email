@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    branches: [main, main-v12, main-v13]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: checks
+    if: vars.ENABLE_AUTO_RELEASE == 'true' && github.repository == 'SirFunset/mfa_email'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+      - name: Check Packagist credentials before creating a release
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_API_TOKEN: ${{ secrets.PACKAGIST_API_TOKEN }}
+        run: |
+          test -n "$PACKAGIST_USERNAME" || { printf 'Missing PACKAGIST_USERNAME secret\n'; exit 1; }
+          test -n "$PACKAGIST_API_TOKEN" || { printf 'Missing PACKAGIST_API_TOKEN secret\n'; exit 1; }
+      - name: Create and push version commit and tag
+        id: version
+        env:
+          RELEASE_BRANCH: ${{ github.ref_name }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: python3 .github/scripts/release.py --branch "$RELEASE_BRANCH" --expected-sha "$EXPECTED_SHA" --push
+      - name: Create GitHub release if absent
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --generate-notes --latest=false
+          fi
+      # GITHUB_TOKEN-created tags do not trigger another workflow: notify here.
+      - name: Notify Packagist and verify indexed version
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_API_TOKEN: ${{ secrets.PACKAGIST_API_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: python3 .github/scripts/publish_packagist.py
