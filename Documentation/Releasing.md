@@ -90,6 +90,11 @@ All pushes, including documentation-only changes, are releases once enabled.
 
 ## TYPO3 12 security gate
 
+Dependency audits report abandoned packages without failing solely on abandonment
+(`--abandoned=report`). TYPO3 12/13 depend on abandoned `doctrine/annotations`;
+that is a maintenance warning, not itself a vulnerability advisory. Actual
+vulnerability advisories remain blocking on every release line.
+
 Public Packagist currently stops at TYPO3 12.4.45. Composer flags security
 advisories in this core and its SVG sanitizer dependency; resolving the v12 line
 with normal security blocking fails. Consequently the default v12 release workflow
@@ -111,7 +116,7 @@ iconv, mbstring, PDO, and XML):
 composer update --prefer-dist --no-interaction --no-plugins --no-scripts
 composer validate --strict
 composer test
-composer audit --locked
+composer audit --locked --abandoned=report
 python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
 ```
 

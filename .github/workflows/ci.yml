@@ -37,7 +37,9 @@ jobs:
               subprocess.run(['php', '-l', str(path)], check=True)
           PY
       - run: composer test
-      - run: composer audit --locked
+      # TYPO3 12/13 require abandoned doctrine/annotations. Report abandonment,
+      # but keep actual vulnerability advisories release-blocking.
+      - run: composer audit --locked --abandoned=report
 
   release-tests:
     runs-on: ubuntu-latest
