@@ -47,6 +47,7 @@ Every push to `main`, `main-v12`, or `main-v13` runs Composer validation, PHP li
 provider regression tests, dependency auditing, and release-script tests. PHP CI
 covers 8.1–8.5 for TYPO3 12 and 8.2–8.5 for TYPO3 13/14. Each runner resolves
 compatible dependencies for its PHP version. No credentials are exposed to PR CI.
+The `main-v12` audit reports advisories without blocking releases (see below).
 
 After CI succeeds and auto-release is enabled:
 
@@ -90,22 +91,23 @@ All pushes, including documentation-only changes, are releases once enabled.
 
 ## TYPO3 12 security gate
 
-Dependency audits report abandoned packages without failing solely on abandonment
-(`--abandoned=report`). TYPO3 12/13 depend on abandoned `doctrine/annotations`;
-that is a maintenance warning, not itself a vulnerability advisory. Actual
-vulnerability advisories remain blocking on every release line.
+TYPO3 12/13 depend on abandoned `doctrine/annotations`; that is a maintenance
+warning, not itself a vulnerability advisory. Only the `main-v12` CI workflow
+temporarily permits dependency resolution with `--no-blocking` and reports
+advisories with a non-blocking audit. Audits on `main-v13` and `main` remain
+release-blocking. This exception does not change consumers' Composer settings.
 
 Public Packagist currently stops at TYPO3 12.4.45. Composer flags security
 advisories in this core and its SVG sanitizer dependency; resolving the v12 line
-with normal security blocking fails. Consequently the default v12 release workflow
-is deliberately blocked, not silently marked green. To ship from that branch,
-configure a supported patched/ELTS dependency source and its CI access, then run
-all gates successfully. This fork does not fix TYPO3 core vulnerabilities.
+with normal security blocking fails. At the maintainer's request, CI allows
+releases despite those advisories, but still prints them in the audit step.
+This is not a security fix: deployments should use a supported patched/ELTS
+dependency source. Remove this exception when one is available to CI.
 
 Local compatibility tests can run against the historical public core in an
 isolated development installation. That is not evidence that the underlying
-TYPO3 installation is production-safe. Do not commit `--no-blocking`, advisory
-ignores, or platform-requirement bypasses to the release workflow as a workaround.
+TYPO3 installation is production-safe. Do not extend the v12 advisory exception
+to other branches or bypass platform requirements in the release workflow.
 
 ## Local verification
 
@@ -113,10 +115,10 @@ Use a PHP installation with TYPO3's required extensions (including intl, sodium,
 iconv, mbstring, PDO, and XML):
 
 ```sh
-composer update --prefer-dist --no-interaction --no-plugins --no-scripts
+composer update --prefer-dist --no-interaction --no-plugins --no-scripts --no-blocking
 composer validate --strict
 composer test
-composer audit --locked --abandoned=report
+composer audit --locked --abandoned=report # reports vulnerabilities; exits nonzero on v12
 python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
 ```
 
